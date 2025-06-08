@@ -1,0 +1,41 @@
+# Core FastMCP
+fastmcp>=2.3.0,<3.0.0
+RestrictedPython>=8.0,<9.0
+
+# Database
+psycopg2-binary>=2.9.6
+asyncpg>=0.29.0,<0.30.0
+
+# HTTP and Async
+httpx>=0.28.1,<0.29.0
+httpx-sse>=0.4.0
+starlette>=0.26.0
+websockets>=11.0.3
+fastapi[all]>=0.115.12,<0.116.0
+sse-starlette>=2.2.1,<3.0.0
+
+# Authentication
+python-jose>=3.3.0
+python-multipart>=0.0.5
+pyjwt>=2.8.0,<3.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+
+# Utilities
+pydantic>=2.5.0
+python-dotenv>=1.1.0,<2.0.0
+pytest>=8.3.5,<9.0.0
+rich>=13.6.0
+typer>=0.9.0
+importlib>=1.0.4,<2.0.0
+pathlib>=1.0.1,<2.0.0
+slowapi>=0.1.9,<0.2.0
+jsonify>=0.5,<0.6
+pyyaml>=6.0.2,<7.0.0
+
+# Monitoring and Debugging
+prometheus-client>=0.17.1
+
+# Additional dependencies
+mcp>=1.8.0
+uvicorn[standard]>=0.34.2,<0.35.0
+redis>=5.0.1,<6.0.0

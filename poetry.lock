@@ -257,6 +257,24 @@ files = [
 pycparser = "*"
 
 [[package]]
+name = "claude-code-sdk"
+version = "0.0.10"
+description = "Python SDK for Claude Code"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "claude_code_sdk-0.0.10-py3-none-any.whl", hash = "sha256:cf4153b1723ff0d7c6a1c281540651c059d6c53b02654cc1ab9e9a85b7092a94"},
+    {file = "claude_code_sdk-0.0.10.tar.gz", hash = "sha256:9fb5d40089845b21de07b0f9dc6e48482c6b819ed5a7cc35dfdcd674b9592213"},
+]
+
+[package.dependencies]
+anyio = ">=4.0.0"
+
+[package.extras]
+dev = ["anyio[trio] (>=4.0.0)", "mypy (>=1.0.0)", "pytest (>=7.0.0)", "pytest-asyncio (>=0.20.0)", "pytest-cov (>=4.0.0)", "ruff (>=0.1.0)"]
+
+[[package]]
 name = "click"
 version = "8.1.8"
 description = "Composable command line interface toolkit"
@@ -2055,4 +2073,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12, <3.14"
-content-hash = "0ae938401445414927082d950faab1115077543a2efaecf25d61e6a6b0f4ebef"
+content-hash = "50381e03c3621882856671a904f738a237df6e063a7655d557085cfee1a32db1"

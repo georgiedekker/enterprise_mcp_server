@@ -62,11 +62,8 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # --- Single FastMCP Instance ---
 # Create a single FastMCP instance that will be used throughout the application
-mcp = FastMCP(
-    allow_anonymous=True,
-    server_name=MCP_SERVER_NAME,
-    on_duplicate_tools="replace"
-)
+mcp = FastMCP(name=MCP_SERVER_NAME)
+
 
 # --- Tool Loading ---
 async def initialize_db_and_load_tools(mcp_instance: FastMCP):

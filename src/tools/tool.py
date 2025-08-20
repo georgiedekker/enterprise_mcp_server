@@ -5,11 +5,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 # Create a separate FastMCP instance for tools
-tool_mcp = FastMCP(
-    allow_anonymous=True,
-    server_name="Tool Server",
-    on_duplicate_tools="replace"
-)
+tool_mcp = FastMCP(name="Tool Server")
 
 @tool_mcp.tool()  # Use tool_mcp not mcp
 def add(a: int, b: int) -> int:

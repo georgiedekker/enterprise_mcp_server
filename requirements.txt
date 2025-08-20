@@ -1,5 +1,5 @@
 # Core FastMCP
-fastmcp>=2.3.0,<3.0.0
+fastmcp>=2.11.3,<3.0.0
 RestrictedPython>=8.0,<9.0
 
 # Database
@@ -35,7 +35,7 @@ pyyaml>=6.0.2,<7.0.0
 # Monitoring and Debugging
 prometheus-client>=0.17.1
 
-# Additional dependencies
-mcp>=1.8.0
+# Additional dependencies - Pin under 2.0 as per FastMCP v2.11.3
+mcp>=1.8.0,<2.0.0
 uvicorn[standard]>=0.34.2,<0.35.0
 redis>=5.0.1,<6.0.0

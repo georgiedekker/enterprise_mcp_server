@@ -69,48 +69,9 @@ class MCPPostgresDB:
     async def _create_tables(conn: asyncpg.Connection):
         """Create necessary tables if they don't exist."""
         
-        # Create tools table
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS mcp_tools (
-                id SERIAL PRIMARY KEY,
-                tool_id UUID NOT NULL UNIQUE,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT NOT NULL,
-                code TEXT NOT NULL,
-                is_multi_file BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                updated_at TIMESTAMP WITH TIME ZONE NOT NULL
-            );
-        ''')
+        # STEP 1: Create independent tables first (no foreign key dependencies)
         
-        # Create tool versions table
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS mcp_tool_versions (
-                id SERIAL PRIMARY KEY,
-                tool_id UUID NOT NULL REFERENCES mcp_tools(tool_id) ON DELETE CASCADE,
-                version_number INTEGER NOT NULL,
-                code TEXT NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                created_by INTEGER REFERENCES users(id),
-                description TEXT,
-                UNIQUE(tool_id, version_number)
-            );
-        ''')
-        
-        # Create multi-file tools auxiliary table
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS mcp_tool_files (
-                id SERIAL PRIMARY KEY,
-                tool_id UUID NOT NULL REFERENCES mcp_tools(tool_id) ON DELETE CASCADE,
-                filename TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                UNIQUE(tool_id, filename)
-            );
-        ''')
-        
-        # Create users table
+        # Create users table first (referenced by other tables)
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -122,8 +83,6 @@ class MCPPostgresDB:
                 email TEXT
             );
         ''')
-        # Ensure email column exists on users for older DB versions
-        await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;')
         
         # Create roles table
         await conn.execute('''
@@ -142,6 +101,52 @@ class MCPPostgresDB:
                 description TEXT
             );
         ''')
+        
+        # Create tools table
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS mcp_tools (
+                id SERIAL PRIMARY KEY,
+                tool_id UUID NOT NULL UNIQUE,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL,
+                code TEXT NOT NULL,
+                is_multi_file BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+            );
+        ''')
+        
+        # STEP 2: Create tables with foreign key dependencies
+        
+        # Create tool versions table (depends on mcp_tools and users)
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS mcp_tool_versions (
+                id SERIAL PRIMARY KEY,
+                tool_id UUID NOT NULL REFERENCES mcp_tools(tool_id) ON DELETE CASCADE,
+                version_number INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                created_by INTEGER REFERENCES users(id),
+                description TEXT,
+                UNIQUE(tool_id, version_number)
+            );
+        ''')
+        
+        # Create multi-file tools auxiliary table (depends on mcp_tools)
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS mcp_tool_files (
+                id SERIAL PRIMARY KEY,
+                tool_id UUID NOT NULL REFERENCES mcp_tools(tool_id) ON DELETE CASCADE,
+                filename TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                UNIQUE(tool_id, filename)
+            );
+        ''')
+        
+        # Ensure email column exists on users for older DB versions
+        await conn.execute('ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;')
         
         # Create role_permissions junction table
         await conn.execute('''

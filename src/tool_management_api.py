@@ -12,7 +12,7 @@ from pathlib import Path
 import tempfile
 import os
 import asyncio
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastmcp import FastMCP
 
 from .dependencies import get_db, get_auth_service, get_audit_service, get_tool_registry

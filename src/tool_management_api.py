@@ -31,13 +31,306 @@ router = APIRouter(
 BACKUP_DIR = Path("backups")
 BACKUP_DIR.mkdir(exist_ok=True)
 
-# Add the ToolInfo model
+# Tool Models for API
 class ToolInfo(BaseModel):
     """Information about a tool"""
     name: str
     description: Optional[str] = None
     version: Optional[str] = None
     type: Optional[str] = None
+
+class ToolCreate(BaseModel):
+    """Model for creating a single-file tool"""
+    name: str = Field(..., description="Name of the tool", min_length=1, max_length=100)
+    description: str = Field(..., description="Description of what the tool does", max_length=1000)
+    code: str = Field(..., description="Python code for the tool", min_length=1)
+    replace_existing: bool = Field(False, description="Whether to replace an existing tool with the same name")
+
+class MultiFileToolCreate(BaseModel):
+    """Model for creating a multi-file tool"""
+    name: str = Field(..., description="Name of the tool", min_length=1, max_length=100)
+    description: str = Field(..., description="Description of what the tool does", max_length=1000)
+    entrypoint: str = Field(..., description="Main file/function entry point (e.g., 'main.py')")
+    files: Dict[str, str] = Field(..., description="Dictionary of filename -> file content")
+    replace_existing: bool = Field(False, description="Whether to replace an existing tool with the same name")
+    tool_dir_uuid: Optional[str] = Field(None, description="Optional tool directory UUID for grouping")
+
+class ToolResponse(BaseModel):
+    """Response model for tool creation"""
+    success: bool
+    message: str
+    tool_id: Optional[str] = None
+    tool_name: str
+    created_at: Optional[str] = None
+    version_number: Optional[int] = None
+
+@router.post("/add", response_model=ToolResponse, summary="Add New Tool")
+async def add_tool(
+    tool_data: ToolCreate,
+    current_user: Annotated[Dict[str, Any], Depends(requires_permission("tool:create"))],
+    db: Annotated[MCPPostgresDB, Depends(get_db)],
+    audit_service: Annotated[AuditLogService, Depends(get_audit_service)],
+):
+    """
+    Add a new single-file tool to the database.
+    
+    Args:
+        tool_data: Tool creation data (name, description, code, etc.)
+        current_user: The authenticated user with tool:create permission
+        db: Database connection
+        audit_service: Audit logging service
+        
+    Returns:
+        ToolResponse with creation details
+    """
+    user_id = current_user.get("id")
+    actor_type = current_user.get("actor_type", "human")
+    
+    try:
+        # Validate tool name (basic checks - database will do more thorough validation)
+        if not tool_data.name.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tool name cannot be empty"
+            )
+        
+        # Check for existing tool if not replacing
+        if not tool_data.replace_existing:
+            existing_tool = await db.get_tool_by_name(tool_data.name.strip())
+            if existing_tool:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Tool '{tool_data.name}' already exists. Use replace_existing=true to overwrite."
+                )
+        
+        # Add the tool to database
+        tool_id = await db.add_tool(
+            name=tool_data.name.strip(),
+            description=tool_data.description.strip(),
+            code=tool_data.code,
+            created_by=user_id,
+            replace_existing=tool_data.replace_existing
+        )
+        
+        # Get the created tool details for response
+        created_tool = await db.get_tool_by_name(tool_data.name.strip())
+        
+        response = ToolResponse(
+            success=True,
+            message=f"Tool '{tool_data.name}' {'replaced' if tool_data.replace_existing else 'created'} successfully",
+            tool_id=tool_id,
+            tool_name=tool_data.name,
+            created_at=created_tool.get("created_at") if created_tool else None,
+            version_number=1  # First version
+        )
+        
+        # Log successful tool creation
+        await audit_service.log_event(
+            actor_id=user_id,
+            actor_type=actor_type,
+            action_type="create_tool",
+            resource_type="tool",
+            resource_id=tool_id,
+            status="success",
+            details={
+                "tool_name": tool_data.name,
+                "description": tool_data.description[:100] + "..." if len(tool_data.description) > 100 else tool_data.description,
+                "code_length": len(tool_data.code),
+                "replaced_existing": tool_data.replace_existing
+            }
+        )
+        
+        return response
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except ValueError as ve:
+        # Database validation errors
+        await audit_service.log_event(
+            actor_id=user_id,
+            actor_type=actor_type,
+            action_type="create_tool",
+            resource_type="tool",
+            resource_id=tool_data.name,
+            status="failure",
+            details={
+                "tool_name": tool_data.name,
+                "error": "Validation error",
+                "error_details": str(ve)
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tool validation failed: {str(ve)}"
+        )
+    except Exception as e:
+        logger.error(f"Error creating tool '{tool_data.name}': {e}", exc_info=True)
+        
+        # Log failure
+        await audit_service.log_event(
+            actor_id=user_id,
+            actor_type=actor_type,
+            action_type="create_tool",
+            resource_type="tool",
+            resource_id=tool_data.name,
+            status="failure",
+            details={
+                "tool_name": tool_data.name,
+                "error": "Unexpected error",
+                "error_details": str(e)
+            }
+        )
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating tool: {str(e)}"
+        )
+
+@router.post("/add-multi", response_model=ToolResponse, summary="Add New Multi-File Tool")
+async def add_multi_file_tool(
+    tool_data: MultiFileToolCreate,
+    current_user: Annotated[Dict[str, Any], Depends(requires_permission("tool:create"))],
+    db: Annotated[MCPPostgresDB, Depends(get_db)],
+    audit_service: Annotated[AuditLogService, Depends(get_audit_service)],
+):
+    """
+    Add a new multi-file tool to the database.
+    
+    Args:
+        tool_data: Multi-file tool creation data (name, description, entrypoint, files, etc.)
+        current_user: The authenticated user with tool:create permission
+        db: Database connection
+        audit_service: Audit logging service
+        
+    Returns:
+        ToolResponse with creation details
+    """
+    user_id = current_user.get("id")
+    actor_type = current_user.get("actor_type", "human")
+    
+    try:
+        # Validate tool name
+        if not tool_data.name.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tool name cannot be empty"
+            )
+        
+        # Validate files
+        if not tool_data.files:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Multi-file tool must contain at least one file"
+            )
+        
+        # Check if entrypoint file exists in files dict
+        if tool_data.entrypoint not in tool_data.files:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Entrypoint file '{tool_data.entrypoint}' not found in files"
+            )
+        
+        # Check for existing tool if not replacing
+        if not tool_data.replace_existing:
+            existing_tool = await db.get_tool_by_name(tool_data.name.strip())
+            if existing_tool:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Tool '{tool_data.name}' already exists. Use replace_existing=true to overwrite."
+                )
+        
+        # Generate tool_dir_uuid if not provided
+        tool_dir_uuid = tool_data.tool_dir_uuid if tool_data.tool_dir_uuid else str(uuid.uuid4())
+        
+        # Add the multi-file tool to database
+        tool_id = await db.add_multi_file_tool(
+            name=tool_data.name.strip(),
+            description=tool_data.description.strip(),
+            entrypoint=tool_data.entrypoint,
+            files=tool_data.files,
+            created_by=user_id,
+            tool_dir_uuid=tool_dir_uuid,
+            replace_existing=tool_data.replace_existing
+        )
+        
+        # Get the created tool details for response
+        created_tool = await db.get_tool_by_name(tool_data.name.strip())
+        
+        response = ToolResponse(
+            success=True,
+            message=f"Multi-file tool '{tool_data.name}' {'replaced' if tool_data.replace_existing else 'created'} successfully",
+            tool_id=tool_id,
+            tool_name=tool_data.name,
+            created_at=created_tool.get("created_at") if created_tool else None,
+            version_number=1  # First version
+        )
+        
+        # Log successful tool creation
+        await audit_service.log_event(
+            actor_id=user_id,
+            actor_type=actor_type,
+            action_type="create_multi_file_tool",
+            resource_type="tool",
+            resource_id=tool_id,
+            status="success",
+            details={
+                "tool_name": tool_data.name,
+                "description": tool_data.description[:100] + "..." if len(tool_data.description) > 100 else tool_data.description,
+                "entrypoint": tool_data.entrypoint,
+                "file_count": len(tool_data.files),
+                "files": list(tool_data.files.keys()),
+                "tool_dir_uuid": tool_dir_uuid,
+                "replaced_existing": tool_data.replace_existing
+            }
+        )
+        
+        return response
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except ValueError as ve:
+        # Database validation errors
+        await audit_service.log_event(
+            actor_id=user_id,
+            actor_type=actor_type,
+            action_type="create_multi_file_tool",
+            resource_type="tool",
+            resource_id=tool_data.name,
+            status="failure",
+            details={
+                "tool_name": tool_data.name,
+                "error": "Validation error",
+                "error_details": str(ve)
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Multi-file tool validation failed: {str(ve)}"
+        )
+    except Exception as e:
+        logger.error(f"Error creating multi-file tool '{tool_data.name}': {e}", exc_info=True)
+        
+        # Log failure
+        await audit_service.log_event(
+            actor_id=user_id,
+            actor_type=actor_type,
+            action_type="create_multi_file_tool",
+            resource_type="tool",
+            resource_id=tool_data.name,
+            status="failure",
+            details={
+                "tool_name": tool_data.name,
+                "error": "Unexpected error",
+                "error_details": str(e)
+            }
+        )
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating multi-file tool: {str(e)}"
+        )
 
 @router.get("/backup", summary="Backup All Tools")
 async def backup_tools(

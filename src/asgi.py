@@ -60,7 +60,7 @@ from .dependencies import get_db, get_auth_service, get_audit_service, get_tool_
 app = FastAPI(
     title="Enterprise MCP Server",
     description="Enterprise MCP Server with ASGI adapter for Uvicorn",
-    version="1.1.0", # Match server version
+    version="1.2.0", # Updated for latest package versions and deprecation fixes
     lifespan=lifespan_manager # Use the lifespan manager from server_fastmcp
 )
 
@@ -183,7 +183,7 @@ async def root():
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
     """Basic health check endpoint."""
-    return {"status": "healthy", "version": "2.3.0"}
+    return {"status": "healthy", "version": "1.2.0"}
 
 @app.get("/api/mcp-health")
 async def mcp_health():
@@ -272,40 +272,9 @@ sse_app = create_sse_app(global_mcp_instance)
 app.mount("/", sse_app)
 logger.info("Mounted Enterprise MCP SSE app at root path to handle /sse and /messages/")
 
-# --- Startup Event Hook ---
-@app.on_event("startup")
-async def startup_event():
-    """Event handler that runs on application startup."""
-    logger.info("Enterprise MCP ASGI app is starting up")
-    
-    try:
-        # Import necessary components
-        # Using relative import
-        from .server import mcp as global_mcp_instance
-        
-        # Tools are now registered via decorators on import.
-        # The check below verifies they are loaded.
-        tools = await global_mcp_instance.get_tools()
-        # Removed the block that called register_builtin_tools
-        # if not tools:
-        #     logger.info("No tools found, registering built-in tools...")
-        #     registration_results = await register_builtin_tools(global_mcp_instance)
-        #     logger.info(f"Tool registration results: {registration_results}")
-        # else:
-        #     logger.info(f"Found {len(tools)} existing tools")
-            
-        # Verify tools are registered
-        # tools = await global_mcp_instance.get_tools() # Redundant check removed
-        logger.info(f"Current tools count at startup: {len(tools)}")
-        if tools:
-            logger.info("Available tools: " + ", ".join(tools.keys()))
-        else:
-            logger.warning("No tools available after startup!")
-            
-    except Exception as e:
-        logger.error(f"Error during startup: {e}", exc_info=True)
-        # Don't raise the error - let the server continue starting up
-        # but log the issue for investigation
+# --- Startup logic is handled by lifespan_manager in server.py ---
+# The deprecated @app.on_event("startup") has been removed in favor of
+# the lifespan context manager which properly handles startup/shutdown
 
 # Error handlers
 @app.exception_handler(Exception)

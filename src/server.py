@@ -43,6 +43,8 @@ from .auth import AuthService
 from .audit import AuditLogService
 from .dependencies import get_db, get_auth_service, get_audit_service, get_tool_registry
 from .tools.tool import tool_mcp  # Import the tool server
+from .tools.claude import claude_mcp  # Import Claude Code tools
+from .tools.claude_auth import claude_auth_mcp  # Import Claude authentication tools
 
 # Configure logging
 logging.basicConfig(
@@ -83,9 +85,16 @@ async def initialize_db_and_load_tools(mcp_instance: FastMCP):
         await auth_service.initialize_roles_and_permissions()
         logger.info("Checked and initialized default roles/permissions.")
         
-        # Mount the tool server to the main MCP instance
-        mcp_instance.mount("tools", tool_mcp)
+        # Mount the tool servers to the main MCP instance
+        # Updated syntax for FastMCP v2.11.3 - mount prefix is now optional
+        mcp_instance.mount(tool_mcp, prefix="tools")
         logger.info("Mounted tools server to main MCP instance.")
+        
+        mcp_instance.mount(claude_mcp, prefix="claude")
+        logger.info("Mounted Claude Code tools to main MCP instance.")
+        
+        mcp_instance.mount(claude_auth_mcp, prefix="claude_auth")
+        logger.info("Mounted Claude authentication tools to main MCP instance.")
         
         return db, auth_service, audit_service
         

@@ -46,6 +46,7 @@ services:
       - "0.0.0.0:8033:8033"
     volumes:
       - ./src:/app/src
+      - claude_auth:/root/.claude
     restart: unless-stopped
     depends_on:
       postgres:
@@ -83,3 +84,4 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  claude_auth:

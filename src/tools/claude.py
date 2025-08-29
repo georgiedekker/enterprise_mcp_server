@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from typing import Optional, List
 
@@ -76,6 +77,13 @@ async def _run_claude_code(params: ClaudeCodeParams) -> str:
 
     # Aggregate assistant text as it streams
     chunks: list[str] = []
+    
+    # Pre-flight checks
+    try:
+        await _check_claude_cli_availability()
+        await _check_authentication_status()
+    except RuntimeError as e:
+        return f"❌ Pre-flight check failed: {str(e)}\n\nTo fix this:\n1. Ensure Claude CLI is installed\n2. Run claude_auth_login to authenticate\n3. Check claude_auth_status for details"
 
     try:
         async for message in query(prompt=params.prompt, options=options):
@@ -85,28 +93,90 @@ async def _run_claude_code(params: ClaudeCodeParams) -> str:
                         chunks.append(block.text)
             elif isinstance(message, ResultMessage):
                 # You could inspect message.cost_usd, tool results, etc. here.
+                if hasattr(message, 'cost_usd') and message.cost_usd > 0:
+                    chunks.append(f"\n💰 Request cost: ${message.cost_usd:.4f}")
                 pass
 
     except CLINotFoundError as e:
         # Claude Code CLI not installed in the image
-        raise RuntimeError(
-            "Claude Code CLI not found. Ensure @anthropic-ai/claude-code is installed in the container."
-        ) from e
+        error_msg = (
+            "🚫 Claude Code CLI not found!\n"
+            "Installation required:\n"
+            "  • Docker: Rebuild with updated Dockerfile\n"
+            "  • Local: npm install -g @anthropic-ai/claude-code\n"
+            "  • Check PATH includes npm global bin directory"
+        )
+        raise RuntimeError(error_msg) from e
     except ProcessError as e:
         # Commonly surfaces auth problems or CLI runtime failures
-        hint = ""
         out = (e.stdout or "") + "\n" + (e.stderr or "")
         lower = out.lower()
+        
         if ("run /login" in lower) or ("not authenticated" in lower) or ("invalid api key" in lower):
-            hint = (
-                " (CLI not logged in: run `claude login` once on this host and persist ~/.claude as a volume)"
+            error_msg = (
+                f"🔐 Authentication required!\n"
+                f"Exit code: {e.exit_code}\n"
+                f"Output: {out}\n\n"
+                f"To authenticate:\n"
+                f"  • Use claude_auth_login tool for interactive setup\n"
+                f"  • Or run 'claude login' manually in container\n"
+                f"  • Credentials will persist in ~/.claude volume"
             )
-        raise RuntimeError(f"Claude Code process failed (exit {e.exit_code}).{hint}\n{out}") from e
+        elif "permission denied" in lower:
+            error_msg = f"🚫 Permission denied (exit {e.exit_code}): {out}"
+        elif "timeout" in lower:
+            error_msg = f"⏰ Timeout error (exit {e.exit_code}): {out}"
+        else:
+            error_msg = f"❌ Claude process failed (exit {e.exit_code}): {out}"
+            
+        raise RuntimeError(error_msg) from e
     except CLIJSONDecodeError as e:
         # SDK couldn't parse stream-json; surface the raw context
-        raise RuntimeError(f"Failed to parse Claude stream: {e}") from e
+        error_msg = (
+            f"🔍 Failed to parse Claude CLI output!\n"
+            f"This usually indicates:\n"
+            f"  • CLI version mismatch with SDK\n"
+            f"  • Corrupted output stream\n"
+            f"  • Network connectivity issues\n"
+            f"Error details: {e}"
+        )
+        raise RuntimeError(error_msg) from e
+    except Exception as e:
+        # Catch-all for unexpected errors
+        error_msg = f"💥 Unexpected error during Claude execution: {type(e).__name__}: {str(e)}"
+        raise RuntimeError(error_msg) from e
 
-    return "".join(chunks).strip()
+    result = "".join(chunks).strip()
+    
+    if not result:
+        return "⚠️ Claude responded but produced no text output. This might indicate:\n• The request was processed but resulted in no response\n• All responses were non-text (tool calls, etc.)\n• Check the prompt and parameters"
+    
+    return result
+
+
+async def _check_claude_cli_availability() -> None:
+    """Check if Claude CLI is available and accessible"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["which", "claude"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Claude CLI not found in PATH")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Timeout checking Claude CLI availability")
+    except FileNotFoundError:
+        raise RuntimeError("'which' command not available")
+
+
+async def _check_authentication_status() -> None:
+    """Check if Claude is authenticated"""
+    config_file = Path.home() / ".claude" / "config.json"
+    if not config_file.exists():
+        raise RuntimeError("No authentication config found at ~/.claude/config.json")
 
 @claude_mcp.tool()
 async def claude_code(
@@ -118,10 +188,24 @@ async def claude_code(
     max_turns: Optional[int] = None,
 ) -> str:
     """
-    Generate / modify code with Claude Code (headless).
-    Important:
-      • Requires prior interactive `claude login` and a persistent ~/.claude.
-      • Uses SDK streaming under the hood (no API key needed for Max login).
+    Execute Claude Code CLI to generate, modify, or analyze code.
+    
+    This tool provides access to Claude's coding capabilities through the official CLI.
+    Prerequisites:
+    • Claude CLI must be installed (@anthropic-ai/claude-code)
+    • Authentication required (use claude_auth_login tool first)
+    • Credentials persist in ~/.claude directory
+    
+    Args:
+        prompt: The task or question for Claude to work on
+        system_prompt: Optional system prompt to guide Claude's behavior
+        path: Working directory for the operation (defaults to current)
+        allowed_tools: List of tools Claude can use (e.g., ['Read', 'Write', 'Bash'])
+        permission_mode: 'plan', 'acceptEdits', or 'bypassPermissions'
+        max_turns: Maximum number of conversation turns (1-20)
+    
+    Returns:
+        Claude's response as text, including any analysis or explanations
     """
     params = ClaudeCodeParams(
         prompt=prompt,
@@ -137,8 +221,15 @@ async def claude_code(
 @claude_mcp.tool()
 async def claude_health() -> str:
     """
-    Attempts a minimal headless run to verify CLI install + login.
-    Returns 'ok' on success, otherwise raises with details.
+    Test Claude Code CLI installation and authentication status.
+    
+    This performs a minimal test to verify:
+    • Claude CLI is installed and accessible
+    • Authentication is configured properly
+    • Basic functionality is working
+    
+    Returns:
+        'ok' if everything is working, error details otherwise
     """
     _ = await _run_claude_code(
         ClaudeCodeParams(prompt="ping", max_turns=1, allowed_tools=[], permission_mode="plan")

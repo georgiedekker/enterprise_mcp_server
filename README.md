@@ -50,6 +50,12 @@ graph TD
 - **Dedicated Tool Environment**: Isolated FastMCP instance for defining and executing operational tools.
 - **Dynamic Tool Registration**: Tools can be added and become immediately available.
 
+**Claude Code Integration (`src/tools/claude.py`, `src/tools/claude_auth.py`):**
+- **Claude Code CLI**: Direct integration with `@anthropic-ai/claude-code` for advanced coding assistance.
+- **Browser-Based Authentication**: OAuth flow support for secure Claude authentication.
+- **Persistent Authentication**: Credentials stored in Docker volumes for convenience.
+- **Error Handling**: Comprehensive error reporting and recovery suggestions.
+
 **General:**
 - **Fully API Compatible**: Designed for seamless integration with MCP clients like Cursor.
 - **Dockerized**: Includes Docker and Docker Compose configurations for easy deployment of all components.
@@ -60,13 +66,14 @@ graph TD
 
 - Docker and Docker Compose
 - Python 3.11+ (for local development)
-- An environment file (`.env`) based on `env.example`.
+- Node.js 20+ and npm (for Claude Code CLI)
+- An environment file (`.env`) based on `.env.example`
 
 ### Environment Setup
 
 1.  **Copy Example Environment File**:
     ```bash
-    cp env.example .env
+    cp .env.example .env
     ```
 2.  **Edit `.env`**: Update placeholder values. Key variables include:
     *   `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_HOST`, `POSTGRES_PORT`: For PostgreSQL connection.
@@ -82,7 +89,25 @@ graph TD
 
     Ensure `POSTGRES_USER` and `POSTGRES_PASSWORD` in `.env` match the credentials used by the `postgres` service in `docker-compose.yml`.
 
-### Running with Docker Compose (Recommended)
+### Quick Setup with Claude Integration
+
+For a complete setup including Claude Code CLI integration:
+
+```bash
+# Run the automated setup script
+./scripts/setup_claude_integration.sh
+```
+
+This script will:
+- Validate prerequisites
+- Create environment file from template  
+- Build Docker images with Claude CLI
+- Start all services
+- Guide you through Claude authentication
+
+### Manual Setup
+
+#### Running with Docker Compose (Recommended)
 
 1.  **Build the Images**:
     ```bash

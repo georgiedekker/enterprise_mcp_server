@@ -17,7 +17,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - workflow-system-network
+      - workflow-shared-network
 
   redis:
     image: redis:7-alpine
@@ -33,7 +33,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - workflow-system-network
+      - workflow-shared-network
   
   # Enterprise MCP server (gateway version)
   enterprise-mcp-server:
@@ -75,11 +75,11 @@ services:
       retries: 3
       start_period: 15s
     networks:
-      - workflow-system-network
+      - workflow-shared-network
 
 networks:
-  workflow-system-network:
-    driver: bridge
+  workflow-shared-network:
+    external: true
 
 volumes:
   postgres_data:

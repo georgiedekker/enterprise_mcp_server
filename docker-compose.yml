@@ -17,7 +17,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - workflow-shared-network
+      - workflow-system-network
 
   redis:
     image: redis:7-alpine
@@ -33,7 +33,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - workflow-shared-network
+      - workflow-system-network
   
   # Enterprise MCP server (gateway version)
   enterprise-mcp-server:
@@ -75,10 +75,10 @@ services:
       retries: 3
       start_period: 15s
     networks:
-      - workflow-shared-network
+      - workflow-system-network
 
 networks:
-  workflow-shared-network:
+  workflow-system-network:
     external: true
 
 volumes:

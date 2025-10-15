@@ -4,12 +4,14 @@ import json
 import asyncio
 import asyncpg
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Any, Union
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone,timedelta
 from functools import partial
 import secrets
+from asyncpg.exceptions import DuplicateDatabaseError, InvalidCatalogNameError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,11 +19,12 @@ logger = logging.getLogger(__name__)
 # Default database configuration from environment variables
 DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
 DB_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
-DB_NAME = os.getenv("POSTGRES_DB", "mcp_server")
+DB_NAME = os.getenv("POSTGRES_DB", "enterprise_mcp_server")
 DB_USER = os.getenv("POSTGRES_USER", "postgres")
 DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
 DB_POOL_MIN_SIZE = int(os.getenv("POSTGRES_POOL_MIN_SIZE", "2"))
 DB_POOL_MAX_SIZE = int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10"))
+DB_ADMIN_DB = os.getenv("POSTGRES_ADMIN_DB", "postgres")
 
 class MCPPostgresDB:
     """Database API for storing and retrieving MCP tool definitions using PostgreSQL."""
@@ -30,24 +33,43 @@ class MCPPostgresDB:
         self.pool = pool
         self._loop = loop
         self._executor = executor
+        self._closed = False
 
     @classmethod
     async def connect(cls) -> "MCPPostgresDB":
         """Create a new database connection pool and instance."""
         loop = asyncio.get_event_loop()
         executor = ThreadPoolExecutor(max_workers=DB_POOL_MAX_SIZE)
-        
         dsn = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
         logger.info(f"Connecting to PostgreSQL at {DB_HOST}:{DB_PORT}/{DB_NAME}")
-        
-        # Create the connection pool
-        pool = await asyncpg.create_pool(
-            dsn=dsn,
-            min_size=DB_POOL_MIN_SIZE,
-            max_size=DB_POOL_MAX_SIZE,
-            command_timeout=60,
-            statement_cache_size=100,
-        )
+        try:
+            pool = await asyncpg.create_pool(
+                dsn=dsn,
+                min_size=DB_POOL_MIN_SIZE,
+                max_size=DB_POOL_MAX_SIZE,
+                command_timeout=60,
+                statement_cache_size=100,
+            )
+        except InvalidCatalogNameError:
+            logger.warning(
+                "Target database '%s' does not exist. Attempting to create it automatically.",
+                DB_NAME,
+            )
+            await cls._ensure_database_exists()
+            try:
+                pool = await asyncpg.create_pool(
+                    dsn=dsn,
+                    min_size=DB_POOL_MIN_SIZE,
+                    max_size=DB_POOL_MAX_SIZE,
+                    command_timeout=60,
+                    statement_cache_size=100,
+                )
+            except Exception:
+                executor.shutdown(wait=False)
+                raise
+        except Exception:
+            executor.shutdown(wait=False)
+            raise
         
         if not pool:
             raise ConnectionError("Failed to create PostgreSQL connection pool")
@@ -64,6 +86,21 @@ class MCPPostgresDB:
 
         slf = cls(pool, loop, executor)
         return slf # Directly return the instance
+
+    async def close(self) -> None:
+        """Close the connection pool and shutdown the executor safely."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self.pool:
+                await self.pool.close()
+        finally:
+            try:
+                if self._executor:
+                    self._executor.shutdown(wait=False)
+            except Exception:
+                pass
 
     @staticmethod
     async def _create_tables(conn: asyncpg.Connection):
@@ -262,6 +299,46 @@ class MCPPostgresDB:
         await conn.execute('CREATE INDEX IF NOT EXISTS users_email_idx ON users(email);')
         
         logger.info("Database tables created successfully")
+
+    @classmethod
+    async def _ensure_database_exists(cls):
+        """
+        Ensure the target database exists by connecting to an admin database (defaults to 'postgres')
+        and creating the desired database if it is missing. This allows the application to self-heal
+        when run against a fresh PostgreSQL instance.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9_]+", DB_NAME):
+            raise ValueError(
+                f"Database name '{DB_NAME}' contains invalid characters; only alphanumeric and underscore are supported."
+            )
+
+        admin_dsn = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_ADMIN_DB}"
+        logger.info(
+            "Ensuring PostgreSQL database '%s' exists using admin database '%s'.",
+            DB_NAME,
+            DB_ADMIN_DB,
+        )
+
+        conn: Optional[asyncpg.Connection] = None
+        try:
+            conn = await asyncpg.connect(dsn=admin_dsn, timeout=30)
+            exists = await conn.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1",
+                DB_NAME,
+            )
+            if exists:
+                logger.info("Database '%s' already exists.", DB_NAME)
+                return
+
+            logger.info("Database '%s' not found; creating it now.", DB_NAME)
+            try:
+                await conn.execute(f'CREATE DATABASE {DB_NAME}')
+                logger.info("Database '%s' created successfully.", DB_NAME)
+            except DuplicateDatabaseError:
+                logger.info("Database '%s' was created concurrently.", DB_NAME)
+        finally:
+            if conn:
+                await conn.close()
 
     async def add_tool(self, name: str, description: str, code: str, created_by: Optional[int] = None, replace_existing: bool = False) -> str:
         """Add a new single-file tool definition to the database or replace if specified."""

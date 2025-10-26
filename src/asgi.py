@@ -25,6 +25,7 @@ import uuid
 import httpx
 from starlette.routing import Mount
 from starlette.responses import Response, StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Dict, List, Optional, Any
 import inspect
 import traceback
@@ -38,6 +39,38 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("fastmcp-asgi")
+
+# Logging filter to exclude health check endpoints from uvicorn access logs
+class HealthCheckLoggingFilter(logging.Filter):
+    """Filter to exclude health check endpoints from logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Check if the log message contains health check endpoints
+        message = record.getMessage()
+        return not any(
+            health_path in message
+            for health_path in ["/api/health", "/api/mcp-health"]
+        )
+
+# Apply the filter to uvicorn access logger
+uvicorn_access_logger = logging.getLogger("uvicorn.access")
+uvicorn_access_logger.addFilter(HealthCheckLoggingFilter())
+
+# Middleware to filter health check logging
+class HealthCheckFilter(BaseHTTPMiddleware):
+    """Middleware to prevent logging of health check endpoints."""
+
+    HEALTH_ENDPOINTS = {"/api/health", "/api/mcp-health"}
+
+    async def dispatch(self, request: Request, call_next):
+        # Check if this is a health check endpoint
+        if request.url.path in self.HEALTH_ENDPOINTS:
+            # Disable uvicorn access logging for this request
+            # by setting a flag that uvicorn's logger can check
+            request.state.skip_logging = True
+
+        response = await call_next(request)
+        return response
 
 # Import the MCP instance and necessary components from the server module
 # Using relative import for server_fastmcp
@@ -91,6 +124,10 @@ app.include_router(
     responses={401: {"description": "Unauthorized"}, 403: {"description": "Forbidden"}}
 )
 logger.info("Included auth, audit, tool management, and tool versions routers.")
+
+# Add health check filter middleware (add before CORS to ensure it runs first)
+app.add_middleware(HealthCheckFilter)
+logger.info("Added health check filter middleware to suppress health endpoint logging.")
 
 # Add CORS middleware
 CORS_ALLOWED_ORIGINS_STR = os.getenv("CORS_ALLOWED_ORIGINS", "https://app.cursor.sh,https://cursor.sh,http://localhost:*,http://127.0.0.1:*")

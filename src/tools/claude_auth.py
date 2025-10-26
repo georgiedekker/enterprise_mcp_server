@@ -130,7 +130,7 @@ async def claude_auth_status() -> str:
         
         if not status.cli_installed:
             status.error = "Claude CLI not installed. Install with: npm install -g @anthropic-ai/claude-code"
-            return json.dumps(status.dict(), indent=2)
+            return json.dumps(status.model_dump(), indent=2)
         
         # Check if config file exists
         status.config_exists = CLAUDE_CONFIG_FILE.exists()
@@ -155,8 +155,8 @@ async def claude_auth_status() -> str:
         status.error = "Timeout checking Claude CLI status"
     except Exception as e:
         status.error = f"Unexpected error: {str(e)}"
-    
-    return json.dumps(status.dict(), indent=2)
+
+    return json.dumps(status.model_dump(), indent=2)
 
 
 @claude_auth_mcp.tool()

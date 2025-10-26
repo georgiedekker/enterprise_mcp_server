@@ -8,14 +8,16 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: enterprise_mcp_server
     ports:
-      - "5434:5432"  # Changed to 5433 on host to avoid conflict with local PostgreSQL
+      - "5434:5432"  # Changed to 5434 on host to avoid conflict with local PostgreSQL
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d:ro  # Mount init scripts
+    # healthcheck:
+    #   test: ["CMD-SHELL", "pg_isready -U postgres -d enterprise_mcp_server || exit 1"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 10
+    #   start_period: 20s  # Give more time for database initialization
     networks:
       - workflow-system-network
 
@@ -49,10 +51,8 @@ services:
       - claude_auth:/root/.claude
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
     environment:
       - HOST=0.0.0.0
       - PORT=8033

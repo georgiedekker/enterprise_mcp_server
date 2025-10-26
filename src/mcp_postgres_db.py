@@ -36,56 +36,133 @@ class MCPPostgresDB:
         self._closed = False
 
     @classmethod
-    async def connect(cls) -> "MCPPostgresDB":
-        """Create a new database connection pool and instance."""
+    async def connect(cls, max_retries: int = 5, retry_delay: float = 2.0) -> "MCPPostgresDB":
+        """Create a new database connection pool and instance with retry logic.
+
+        Args:
+            max_retries: Maximum number of connection attempts (default: 5)
+            retry_delay: Initial delay between retries in seconds, doubles on each retry (default: 2.0)
+
+        Returns:
+            MCPPostgresDB: Connected database instance
+
+        Raises:
+            ConnectionError: If unable to establish connection after all retries
+        """
         loop = asyncio.get_event_loop()
         executor = ThreadPoolExecutor(max_workers=DB_POOL_MAX_SIZE)
         dsn = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-        logger.info(f"Connecting to PostgreSQL at {DB_HOST}:{DB_PORT}/{DB_NAME}")
-        try:
-            pool = await asyncpg.create_pool(
-                dsn=dsn,
-                min_size=DB_POOL_MIN_SIZE,
-                max_size=DB_POOL_MAX_SIZE,
-                command_timeout=60,
-                statement_cache_size=100,
-            )
-        except InvalidCatalogNameError:
-            logger.warning(
-                "Target database '%s' does not exist. Attempting to create it automatically.",
-                DB_NAME,
-            )
-            await cls._ensure_database_exists()
+
+        logger.info(f"Attempting to connect to PostgreSQL at {DB_HOST}:{DB_PORT}/{DB_NAME}")
+        logger.info(f"Connection parameters: user={DB_USER}, pool_size={DB_POOL_MIN_SIZE}-{DB_POOL_MAX_SIZE}")
+
+        pool = None
+        last_error = None
+        current_delay = retry_delay
+
+        for attempt in range(1, max_retries + 1):
             try:
+                logger.info(f"Connection attempt {attempt}/{max_retries}")
+
+                # Try to create the pool
                 pool = await asyncpg.create_pool(
                     dsn=dsn,
                     min_size=DB_POOL_MIN_SIZE,
                     max_size=DB_POOL_MAX_SIZE,
                     command_timeout=60,
                     statement_cache_size=100,
+                    timeout=30,  # Connection timeout
                 )
-            except Exception:
-                executor.shutdown(wait=False)
-                raise
-        except Exception:
-            executor.shutdown(wait=False)
-            raise
-        
+
+                logger.info(f"Successfully created connection pool on attempt {attempt}")
+                break  # Success! Exit retry loop
+
+            except InvalidCatalogNameError as e:
+                logger.warning(
+                    f"Database '{DB_NAME}' does not exist (attempt {attempt}/{max_retries}). "
+                    f"Attempting to create it automatically..."
+                )
+
+                try:
+                    await cls._ensure_database_exists()
+                    logger.info(f"Database creation completed, retrying connection...")
+
+                    # Retry immediately after creating database
+                    pool = await asyncpg.create_pool(
+                        dsn=dsn,
+                        min_size=DB_POOL_MIN_SIZE,
+                        max_size=DB_POOL_MAX_SIZE,
+                        command_timeout=60,
+                        statement_cache_size=100,
+                        timeout=30,
+                    )
+                    logger.info("Successfully connected after database creation")
+                    break  # Success! Exit retry loop
+
+                except Exception as create_err:
+                    logger.error(
+                        f"Failed to create database or reconnect (attempt {attempt}/{max_retries}): {create_err}",
+                        exc_info=True
+                    )
+                    last_error = create_err
+
+                    if attempt < max_retries:
+                        logger.info(f"Waiting {current_delay}s before retry...")
+                        await asyncio.sleep(current_delay)
+                        current_delay *= 2  # Exponential backoff
+
+            except (OSError, ConnectionRefusedError, asyncio.TimeoutError) as e:
+                # Network/connection errors - retry with backoff
+                logger.warning(
+                    f"Connection failed (attempt {attempt}/{max_retries}): {type(e).__name__}: {e}"
+                )
+                last_error = e
+
+                if attempt < max_retries:
+                    logger.info(f"Waiting {current_delay}s before retry...")
+                    await asyncio.sleep(current_delay)
+                    current_delay *= 2  # Exponential backoff
+
+            except Exception as e:
+                # Unexpected error
+                logger.error(
+                    f"Unexpected error during connection (attempt {attempt}/{max_retries}): {e}",
+                    exc_info=True
+                )
+                last_error = e
+
+                if attempt < max_retries:
+                    logger.info(f"Waiting {current_delay}s before retry...")
+                    await asyncio.sleep(current_delay)
+                    current_delay *= 2
+
+        # Check if we successfully created a pool
         if not pool:
-            raise ConnectionError("Failed to create PostgreSQL connection pool")
-        
+            executor.shutdown(wait=False)
+            error_msg = (
+                f"Failed to connect to PostgreSQL at {DB_HOST}:{DB_PORT}/{DB_NAME} "
+                f"after {max_retries} attempts. Last error: {last_error}"
+            )
+            logger.error(error_msg)
+            raise ConnectionError(error_msg) from last_error
+
         # Check connection and create tables if they don't exist
         try:
+            logger.info("Verifying connection and creating tables...")
             async with pool.acquire() as conn:
                 await cls._create_tables(conn)
+            logger.info("Database initialization completed successfully")
         except Exception as e:
             logger.error(f"Failed during initial table creation: {e}", exc_info=True)
-            # Attempt to close the pool if table creation fails immediately
-            await pool.close()
+            try:
+                await pool.close()
+            except Exception:
+                pass
+            executor.shutdown(wait=False)
             raise ConnectionError(f"Failed initial table creation: {e}") from e
 
         slf = cls(pool, loop, executor)
-        return slf # Directly return the instance
+        return slf
 
     async def close(self) -> None:
         """Close the connection pool and shutdown the executor safely."""
@@ -301,12 +378,20 @@ class MCPPostgresDB:
         logger.info("Database tables created successfully")
 
     @classmethod
-    async def _ensure_database_exists(cls):
+    async def _ensure_database_exists(cls, max_retries: int = 3) -> None:
         """
         Ensure the target database exists by connecting to an admin database (defaults to 'postgres')
         and creating the desired database if it is missing. This allows the application to self-heal
         when run against a fresh PostgreSQL instance.
+
+        Args:
+            max_retries: Maximum number of connection attempts to admin database (default: 3)
+
+        Raises:
+            ValueError: If database name contains invalid characters
+            ConnectionError: If unable to connect to admin database after retries
         """
+        # Validate database name to prevent SQL injection
         if not re.fullmatch(r"[A-Za-z0-9_]+", DB_NAME):
             raise ValueError(
                 f"Database name '{DB_NAME}' contains invalid characters; only alphanumeric and underscore are supported."
@@ -314,31 +399,76 @@ class MCPPostgresDB:
 
         admin_dsn = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_ADMIN_DB}"
         logger.info(
-            "Ensuring PostgreSQL database '%s' exists using admin database '%s'.",
-            DB_NAME,
-            DB_ADMIN_DB,
+            f"Ensuring PostgreSQL database '{DB_NAME}' exists using admin database '{DB_ADMIN_DB}' "
+            f"at {DB_HOST}:{DB_PORT}"
         )
 
         conn: Optional[asyncpg.Connection] = None
-        try:
-            conn = await asyncpg.connect(dsn=admin_dsn, timeout=30)
-            exists = await conn.fetchval(
-                "SELECT 1 FROM pg_database WHERE datname = $1",
-                DB_NAME,
-            )
-            if exists:
-                logger.info("Database '%s' already exists.", DB_NAME)
-                return
+        last_error = None
 
-            logger.info("Database '%s' not found; creating it now.", DB_NAME)
+        for attempt in range(1, max_retries + 1):
             try:
-                await conn.execute(f'CREATE DATABASE {DB_NAME}')
-                logger.info("Database '%s' created successfully.", DB_NAME)
-            except DuplicateDatabaseError:
-                logger.info("Database '%s' was created concurrently.", DB_NAME)
-        finally:
-            if conn:
-                await conn.close()
+                logger.info(f"Connecting to admin database (attempt {attempt}/{max_retries})...")
+                conn = await asyncpg.connect(dsn=admin_dsn, timeout=30)
+                logger.info(f"Successfully connected to admin database '{DB_ADMIN_DB}'")
+
+                # Check if target database exists
+                exists = await conn.fetchval(
+                    "SELECT 1 FROM pg_database WHERE datname = $1",
+                    DB_NAME,
+                )
+
+                if exists:
+                    logger.info(f"Database '{DB_NAME}' already exists")
+                    return
+
+                # Database doesn't exist, create it
+                logger.info(f"Database '{DB_NAME}' not found; creating it now...")
+                try:
+                    # Cannot use parameterized query for CREATE DATABASE
+                    await conn.execute(f'CREATE DATABASE {DB_NAME}')
+                    logger.info(f"Database '{DB_NAME}' created successfully")
+                    return
+
+                except DuplicateDatabaseError:
+                    logger.info(f"Database '{DB_NAME}' was created concurrently by another process")
+                    return
+
+                except Exception as create_err:
+                    logger.error(f"Error creating database '{DB_NAME}': {create_err}", exc_info=True)
+                    raise
+
+            except (OSError, ConnectionRefusedError, asyncio.TimeoutError) as e:
+                logger.warning(
+                    f"Failed to connect to admin database (attempt {attempt}/{max_retries}): {type(e).__name__}: {e}"
+                )
+                last_error = e
+
+                if attempt < max_retries:
+                    retry_delay = attempt * 2  # Progressive backoff
+                    logger.info(f"Waiting {retry_delay}s before retry...")
+                    await asyncio.sleep(retry_delay)
+
+            except Exception as e:
+                logger.error(f"Unexpected error ensuring database exists: {e}", exc_info=True)
+                raise
+
+            finally:
+                if conn:
+                    try:
+                        await conn.close()
+                        conn = None
+                    except Exception:
+                        pass
+
+        # If we got here, all retries failed
+        error_msg = (
+            f"Failed to connect to admin database '{DB_ADMIN_DB}' at {DB_HOST}:{DB_PORT} "
+            f"after {max_retries} attempts. Cannot ensure database '{DB_NAME}' exists. "
+            f"Last error: {last_error}"
+        )
+        logger.error(error_msg)
+        raise ConnectionError(error_msg) from last_error
 
     async def add_tool(self, name: str, description: str, code: str, created_by: Optional[int] = None, replace_existing: bool = False) -> str:
         """Add a new single-file tool definition to the database or replace if specified."""

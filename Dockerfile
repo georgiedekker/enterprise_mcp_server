@@ -1,12 +1,24 @@
 FROM python:3.12-slim
 
 LABEL description="Enterprise MCP Gateway Server with Claude Code CLI"
-LABEL version="1.2"
+LABEL version="1.3"
 LABEL maintainer="George Dekker"
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    POETRY_VERSION=1.8.3 \
+    POETRY_HOME="/opt/poetry" \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_CACHE_DIR=/var/cache/pypoetry \
+    POETRY_NO_INTERACTION=1
+
+# Add Poetry to PATH
+ENV PATH="$POETRY_HOME/bin:$PATH"
 
 WORKDIR /app
 
-# Install system dependencies including Node.js and clean up
+# Install system dependencies including Node.js, Poetry and clean up
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
@@ -18,6 +30,7 @@ RUN apt-get update && \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y nodejs \
+    && curl -sSL https://install.python-poetry.org | python3 - --version $POETRY_VERSION \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,11 +40,14 @@ RUN npm install -g @anthropic-ai/claude-code
 # Create directory for Claude configuration
 RUN mkdir -p /root/.claude
 
-# Copy requirements files
-COPY requirements.txt /app/
+# Copy Poetry configuration files
+COPY pyproject.toml poetry.lock* ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies using Poetry
+RUN poetry config virtualenvs.create false && \
+    poetry lock && \
+    poetry install --no-interaction --no-ansi && \
+    poetry cache clear --all .
 
 # Copy the application code
 COPY . /app/

@@ -1,5 +1,6 @@
 import logging
-import uuid
+from uuid import UUID
+from uuid_v7.base import uuid7
 import json
 import asyncio
 import asyncpg
@@ -473,7 +474,7 @@ class MCPPostgresDB:
     async def add_tool(self, name: str, description: str, code: str, created_by: Optional[int] = None, replace_existing: bool = False) -> str:
         """Add a new single-file tool definition to the database or replace if specified."""
         now = self._get_timestamp()
-        tool_uuid = uuid.uuid4()
+        tool_uuid = uuid7()
         tool_uuid_str = str(tool_uuid)
 
         async with self.pool.acquire() as conn:
@@ -519,7 +520,7 @@ class MCPPostgresDB:
     async def add_multi_file_tool(self, name: str, description: str, entrypoint: str, files: Dict[str, str], created_by: Optional[int] = None, tool_dir_uuid: Optional[str] = None, replace_existing: bool = False) -> str:
         """Add a new multi-file tool definition to the database or replace if specified."""
         now = self._get_timestamp()
-        tool_uuid = uuid.UUID(tool_dir_uuid) if tool_dir_uuid else uuid.uuid4()
+        tool_uuid = UUID(tool_dir_uuid) if tool_dir_uuid else uuid7()
         tool_uuid_str = str(tool_uuid)
 
         if not entrypoint or entrypoint not in files:
@@ -756,9 +757,9 @@ class MCPPostgresDB:
             
             return tools
 
-    async def get_tool_versions(self, tool_id: Union[str, uuid.UUID]) -> List[Dict[str, Any]]:
+    async def get_tool_versions(self, tool_id: Union[str, UUID]) -> List[Dict[str, Any]]:
         """Get all versions for a specific tool."""
-        tool_uuid_obj = uuid.UUID(tool_id) if isinstance(tool_id, str) else tool_id
+        tool_uuid_obj = UUID(tool_id) if isinstance(tool_id, str) else tool_id
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT * FROM mcp_tool_versions WHERE tool_id = $1 ORDER BY version_number DESC
@@ -767,7 +768,7 @@ class MCPPostgresDB:
 
     async def add_tool_version(
         self,
-        tool_id: Union[int, uuid.UUID],  # Accept SERIAL ID or UUID
+        tool_id: Union[int, UUID],  # Accept SERIAL ID or UUID
         code: str,
         created_by: Optional[int] = None, # Add creator ID
         description: Optional[str] = None # Allow storing description with version
@@ -786,7 +787,7 @@ class MCPPostgresDB:
                     if not tool_record:
                         raise ValueError(f"Tool with internal ID {tool_id} not found.")
                     tool_uuid = tool_record['tool_id']
-                elif isinstance(tool_id, uuid.UUID):
+                elif isinstance(tool_id, UUID):
                     tool_uuid = tool_id
                     # Verify UUID exists
                     tool_record = await conn.fetchrow('''
@@ -829,10 +830,10 @@ class MCPPostgresDB:
             "description": description
         }
 
-    async def restore_tool_version(self, tool_id: Union[str, uuid.UUID], version_number: int) -> bool:
+    async def restore_tool_version(self, tool_id: Union[str, UUID], version_number: int) -> bool:
         """Restore a specific version of a single-file tool."""
         now = self._get_timestamp()
-        tool_uuid_obj = uuid.UUID(tool_id) if isinstance(tool_id, str) else tool_id
+        tool_uuid_obj = UUID(tool_id) if isinstance(tool_id, str) else tool_id
         
         async with self.pool.acquire() as conn:
              async with conn.transaction():

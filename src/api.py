@@ -6,7 +6,7 @@ This provides a REST API for managing the Enterprise MCP server.
 import os
 import sys
 import json
-import uuid
+from uuid_v7.base import uuid7
 import logging
 import secrets
 from typing import Dict, List, Optional, Any, Union, Annotated
@@ -281,7 +281,7 @@ async def register_client(
             )
     
     # Generate client ID and secret
-    client_id = str(uuid.uuid4())
+    client_id = str(uuid7())
     client_secret = secrets.token_urlsafe(32)
     
     # Prepare client data

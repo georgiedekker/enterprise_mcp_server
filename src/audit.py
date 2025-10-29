@@ -1,5 +1,5 @@
 import logging
-import uuid
+from uuid_v7.base import uuid7
 from typing import Dict, Optional, Any, List
 from datetime import datetime, timedelta
 from fastapi import Request
@@ -144,7 +144,7 @@ class AuditLogService:
             ID of the created audit log entry
         """
         # Generate a unique request ID if not already present
-        request_id = getattr(request, "id", str(uuid.uuid4())) if request else str(uuid.uuid4())
+        request_id = getattr(request, "id", str(uuid7())) if request else str(uuid7())
         
         # Extract client IP if request is provided
         ip_address = None

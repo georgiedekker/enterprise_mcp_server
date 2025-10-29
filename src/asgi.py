@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import secrets
 import time
-import uuid
+from uuid_v7.base import uuid7
 import httpx
 from starlette.routing import Mount
 from starlette.responses import Response, StreamingResponse

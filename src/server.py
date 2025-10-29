@@ -12,7 +12,6 @@ import asyncio
 import ast
 import traceback
 import sys
-import uuid
 from typing import Dict, List, Optional, Union, Any, get_type_hints, Annotated, Set, Callable, Coroutine, TypeVar, Literal
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,6 +22,7 @@ import tempfile
 import subprocess
 import importlib
 from contextlib import asynccontextmanager
+from uuid_v7.base import uuid7
 
 # Add parent directory to path if running as main module
 if __name__ == "__main__":

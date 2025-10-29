@@ -1,7 +1,7 @@
 import os
 import logging
 import jwt
-import uuid
+from uuid_v7.base import uuid7
 from typing import Dict, List, Optional, Set, Any, Union, Annotated
 from datetime import datetime, timezone, timedelta
 from fastapi import Depends, HTTPException, status, Request
@@ -256,11 +256,11 @@ class AuthService:
     def generate_api_key(self) -> str:
         """
         Generate a new API key.
-        
+
         Returns:
             Randomly generated API key string
         """
-        return f"mcp_{uuid.uuid4().hex}_{secrets.token_hex(16)}"
+        return f"mcp_{uuid7().hex}_{secrets.token_hex(16)}"
     
     async def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
         """

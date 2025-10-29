@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import uuid
+from uuid_v7.base import uuid7
 import logging
 from collections.abc import AsyncIterator
 from concurrent.futures.thread import ThreadPoolExecutor
@@ -144,7 +144,7 @@ class CleaningRequestDB:
 
     async def add_request(self, payload: CleaningRequestPayload) -> str:
         """Add a new cleaning request to the database."""
-        request_id = str(uuid.uuid4())
+        request_id = str(uuid7())
         now = datetime.utcnow().isoformat()
         
         await self._asyncify(

@@ -14,7 +14,7 @@ import logging
 import asyncio
 import time
 import json
-import uuid
+from uuid_v7.base import uuid7
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Callable, Awaitable, cast
 
@@ -298,7 +298,7 @@ async def log_request_analytics(request: Request, response_status: int, response
         method = request.method
         path = request.url.path
         timestamp = datetime.now().isoformat()
-        request_id = str(uuid.uuid4())
+        request_id = str(uuid7())
         
         # Create analytics entry
         analytics_data = {

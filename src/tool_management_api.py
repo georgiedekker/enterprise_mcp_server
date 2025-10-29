@@ -3,7 +3,7 @@ Tool management API endpoints for backup and restore functionality.
 """
 import logging
 import json
-import uuid
+from uuid_v7.base import uuid7
 import datetime
 from typing import Dict, List, Any, Optional, Annotated
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Body, BackgroundTasks, Query, status
@@ -241,7 +241,7 @@ async def add_multi_file_tool(
                 )
         
         # Generate tool_dir_uuid if not provided
-        tool_dir_uuid = tool_data.tool_dir_uuid if tool_data.tool_dir_uuid else str(uuid.uuid4())
+        tool_dir_uuid = tool_data.tool_dir_uuid if tool_data.tool_dir_uuid else str(uuid7())
         
         # Add the multi-file tool to database
         tool_id = await db.add_multi_file_tool(
@@ -355,7 +355,7 @@ async def backup_tools(
         Object with backup job details and status
     """
     # Generate a unique backup ID and filename
-    backup_id = str(uuid.uuid4())
+    backup_id = str(uuid7())
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     filename = f"tool_backup_{timestamp}_{backup_id}.json"
     
@@ -545,7 +545,7 @@ async def restore_tools(
         raise HTTPException(status_code=400, detail="Backup file must be a JSON file")
     
     # Generate a unique restore ID
-    restore_id = str(uuid.uuid4())
+    restore_id = str(uuid7())
     
     # Save the uploaded file to a temporary location
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json")
@@ -883,7 +883,7 @@ async def _process_restore(
                             entrypoint=tool.get("code", "main.py"),  # Entrypoint filename
                             files=tool.get("files", {}), # Dictionary of files
                             created_by=user_id,
-                            tool_dir_uuid=tool.get("tool_dir_id", str(uuid.uuid4())),
+                            tool_dir_uuid=tool.get("tool_dir_id", str(uuid7())),
                             replace_existing=True # Force replacement
                         )
                     else:
@@ -907,7 +907,7 @@ async def _process_restore(
                             entrypoint=tool.get("code", "main.py"),  # Entrypoint filename
                             files=tool.get("files", {}), # Dictionary of files
                             created_by=user_id,
-                            tool_dir_uuid=tool.get("tool_dir_id", str(uuid.uuid4()))
+                            tool_dir_uuid=tool.get("tool_dir_id", str(uuid7()))
                         )
                     else:
                         # Single file tool

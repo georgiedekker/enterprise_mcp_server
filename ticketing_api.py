@@ -20,17 +20,17 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-P = ParamSpec('P')
-R = TypeVar('R')
+P = ParamSpec("P")
+R = TypeVar("R")
 
 # Default database location
-DEFAULT_DB_PATH = Path(__file__).parent / 'tickets.sqlite'
+DEFAULT_DB_PATH = Path(__file__).parent / "tickets.sqlite"
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Cleaning Request API",
     description="API for managing cleaning requests",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Configure CORS
@@ -46,11 +46,13 @@ app.add_middleware(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 # Define the Pydantic model for cleaning requests
 class CleaningRequestPayload(BaseModel):
     location: str = Field(..., description="Exact location of the incident")
     severity: int = Field(..., ge=1, le=5, description="Severity level (1-5 scale)")
     contact_email: Optional[str] = Field(None, description="Optional contact email")
+
 
 @app.post("/create-request", summary="Create a new cleaning request", status_code=201)
 async def http_create_request(request: Request, payload: CleaningRequestPayload):
@@ -64,8 +66,13 @@ async def http_create_request(request: Request, payload: CleaningRequestPayload)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Unexpected error in /create-request endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error during request creation.")
+        logger.error(
+            f"Unexpected error in /create-request endpoint: {e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=500, detail="Internal server error during request creation."
+        )
+
 
 async def create_request(payload: CleaningRequestPayload):
     """Create a new cleaning request in the database and return its ID."""
@@ -74,8 +81,9 @@ async def create_request(payload: CleaningRequestPayload):
         return {
             "status": "success",
             "message": "Cleaning request created successfully",
-            "request_id": request_id
+            "request_id": request_id,
         }
+
 
 @app.get("/tickets", summary="List all cleaning requests")
 async def list_tickets(request: Request):
@@ -88,29 +96,36 @@ async def list_tickets(request: Request):
         return JSONResponse(content=result, status_code=200)
     except Exception as e:
         logger.error(f"Unexpected error in /tickets endpoint: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error while retrieving tickets.")
+        raise HTTPException(
+            status_code=500, detail="Internal server error while retrieving tickets."
+        )
+
 
 async def get_all_tickets():
     """Retrieve all cleaning requests from the database."""
     async with CleaningRequestDB.connect() as db:
         tickets = await db.get_all_requests()
-        return {
-            "status": "success",
-            "tickets": tickets,
-            "count": len(tickets)
-        }
+        return {"status": "success", "tickets": tickets, "count": len(tickets)}
+
 
 class CleaningRequestDB:
     """API for interacting with the cleaning request database."""
 
-    def __init__(self, con: sqlite3.Connection, loop: asyncio.AbstractEventLoop, executor: ThreadPoolExecutor):
+    def __init__(
+        self,
+        con: sqlite3.Connection,
+        loop: asyncio.AbstractEventLoop,
+        executor: ThreadPoolExecutor,
+    ):
         self.con = con
         self._loop = loop
         self._executor = executor
 
     @classmethod
     @asynccontextmanager
-    async def connect(cls, file: Path = DEFAULT_DB_PATH) -> AsyncIterator[CleaningRequestDB]:
+    async def connect(
+        cls, file: Path = DEFAULT_DB_PATH
+    ) -> AsyncIterator[CleaningRequestDB]:
         """Create a new database connection with a dynamic path."""
         loop = asyncio.get_event_loop()
         executor = ThreadPoolExecutor(max_workers=1)
@@ -127,7 +142,8 @@ class CleaningRequestDB:
         con = sqlite3.connect(str(file))
         con.row_factory = sqlite3.Row  # Enable row factory for named access
         cur = con.cursor()
-        cur.execute('''
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS cleaning_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 request_id TEXT NOT NULL,
@@ -138,7 +154,8 @@ class CleaningRequestDB:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-        ''')
+        """
+        )
         con.commit()
         return con
 
@@ -146,19 +163,26 @@ class CleaningRequestDB:
         """Add a new cleaning request to the database."""
         request_id = str(uuid7())
         now = datetime.utcnow().isoformat()
-        
+
         await self._asyncify(
             self._execute,
-            '''
+            """
             INSERT INTO cleaning_requests 
             (request_id, location, severity, contact_email, status, created_at, updated_at)
             VALUES (?, ?, ?, ?, 'pending', ?, ?)
-            ''',
-            request_id, payload.location, payload.severity, payload.contact_email, now, now,
-            commit=True
+            """,
+            request_id,
+            payload.location,
+            payload.severity,
+            payload.contact_email,
+            now,
+            now,
+            commit=True,
         )
-        
-        logger.info(f"Created cleaning request {request_id} for location: {payload.location}")
+
+        logger.info(
+            f"Created cleaning request {request_id} for location: {payload.location}"
+        )
         return request_id
 
     async def get_request(self, request_id: str) -> Optional[Dict[str, Any]]:
@@ -166,7 +190,7 @@ class CleaningRequestDB:
         cursor = await self._asyncify(
             self._execute,
             "SELECT * FROM cleaning_requests WHERE request_id = ?",
-            request_id
+            request_id,
         )
         row = await self._asyncify(cursor.fetchone)
         if row:
@@ -205,6 +229,7 @@ class CleaningRequestDB:
             "SELECT * FROM cleaning_requests ORDER BY created_at DESC"
         )
 
+
 # class CleaningRequest(BaseModel):
 #     request_id: str = Field(..., description="Unique identifier for the request")
 #     status: str = Field(..., description="Current status of the request")
@@ -239,5 +264,5 @@ class CleaningRequestDB:
 # Add this at the end of the file
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8769)
-  

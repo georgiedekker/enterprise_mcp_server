@@ -9,6 +9,7 @@ from .dependencies import get_audit_service
 
 logger = logging.getLogger(__name__)
 
+
 # Define request and response models
 class AuditLogResponse(BaseModel):
     id: int
@@ -23,6 +24,7 @@ class AuditLogResponse(BaseModel):
     request_id: Optional[str] = None
     ip_address: Optional[str] = None
 
+
 # Create the router
 router = APIRouter(
     tags=["audit"],
@@ -31,6 +33,7 @@ router = APIRouter(
         403: {"description": "Forbidden"},
     },
 )
+
 
 # API Endpoints
 @router.get("/logs", response_model=List[AuditLogResponse])
@@ -47,11 +50,11 @@ async def get_audit_logs(
     resource_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = Query(100, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
 ):
     """
     Get audit logs with optional filtering.
-    
+
     Args:
         current_user: The authenticated user with log:read permission
         audit_service: The audit log service
@@ -66,7 +69,7 @@ async def get_audit_logs(
         status: Filter logs by status
         limit: Maximum number of logs to return (max 1000)
         offset: Offset for pagination
-        
+
     Returns:
         List of audit log entries
     """
@@ -81,9 +84,9 @@ async def get_audit_logs(
             resource_id=resource_id,
             status=status,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
-        
+
         # Log the audit log retrieval (meta-logging)
         filter_details = {}
         if start_time:
@@ -102,7 +105,7 @@ async def get_audit_logs(
             filter_details["resource_id"] = resource_id
         if status:
             filter_details["status"] = status
-        
+
         await audit_service.log_event(
             actor_id=current_user["id"],
             actor_type="human",
@@ -116,14 +119,14 @@ async def get_audit_logs(
                 "offset": offset,
                 "result_count": len(logs),
             },
-            request=request
+            request=request,
         )
-        
+
         return logs
-    
+
     except Exception as e:
         logger.error(f"Failed to retrieve audit logs: {e}")
-        
+
         # Log the failure
         await audit_service.log_event(
             actor_id=current_user["id"],
@@ -133,10 +136,10 @@ async def get_audit_logs(
             resource_id=None,
             status="failure",
             details={"error": str(e)},
-            request=request
+            request=request,
         )
-        
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve audit logs: {e}"
-        ) 
+            detail=f"Failed to retrieve audit logs: {e}",
+        )

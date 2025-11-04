@@ -33,8 +33,9 @@ DEFAULT_OPTIONS = ClaudeCodeOptions(
     system_prompt="You are a helpful assistant.",
     cwd=Path("."),  # project/workdir inside the container
     allowed_tools=["Read", "Write", "Bash"],  # be conservative in prod
-    permission_mode="acceptEdits",            # or "plan" / "bypassPermissions"
+    permission_mode="acceptEdits",  # or "plan" / "bypassPermissions"
 )
+
 
 class ClaudeCodeParams(BaseModel):
     prompt: str = Field(..., description="User prompt for Claude Code.")
@@ -54,6 +55,7 @@ class ClaudeCodeParams(BaseModel):
         default=None, ge=1, le=20, description="Cap agent loop iterations."
     )
 
+
 def _build_options(params: ClaudeCodeParams) -> ClaudeCodeOptions:
     """Merge per-call overrides onto DEFAULT_OPTIONS."""
     return ClaudeCodeOptions(
@@ -61,10 +63,13 @@ def _build_options(params: ClaudeCodeParams) -> ClaudeCodeOptions:
         system_prompt=params.system_prompt or DEFAULT_OPTIONS.system_prompt,
         cwd=Path(params.path) if params.path else DEFAULT_OPTIONS.cwd,
         allowed_tools=(
-            params.allowed_tools if params.allowed_tools is not None else DEFAULT_OPTIONS.allowed_tools
+            params.allowed_tools
+            if params.allowed_tools is not None
+            else DEFAULT_OPTIONS.allowed_tools
         ),
         permission_mode=params.permission_mode or DEFAULT_OPTIONS.permission_mode,
     )
+
 
 async def _run_claude_code(params: ClaudeCodeParams) -> str:
     """
@@ -77,7 +82,7 @@ async def _run_claude_code(params: ClaudeCodeParams) -> str:
 
     # Aggregate assistant text as it streams
     chunks: list[str] = []
-    
+
     # Pre-flight checks
     try:
         await _check_claude_cli_availability()
@@ -93,7 +98,7 @@ async def _run_claude_code(params: ClaudeCodeParams) -> str:
                         chunks.append(block.text)
             elif isinstance(message, ResultMessage):
                 # You could inspect message.cost_usd, tool results, etc. here.
-                if hasattr(message, 'cost_usd') and message.cost_usd > 0:
+                if hasattr(message, "cost_usd") and message.cost_usd > 0:
                     chunks.append(f"\n💰 Request cost: ${message.cost_usd:.4f}")
                 pass
 
@@ -111,8 +116,12 @@ async def _run_claude_code(params: ClaudeCodeParams) -> str:
         # Commonly surfaces auth problems or CLI runtime failures
         out = (e.stdout or "") + "\n" + (e.stderr or "")
         lower = out.lower()
-        
-        if ("run /login" in lower) or ("not authenticated" in lower) or ("invalid api key" in lower):
+
+        if (
+            ("run /login" in lower)
+            or ("not authenticated" in lower)
+            or ("invalid api key" in lower)
+        ):
             error_msg = (
                 f"🔐 Authentication required!\n"
                 f"Exit code: {e.exit_code}\n"
@@ -128,7 +137,7 @@ async def _run_claude_code(params: ClaudeCodeParams) -> str:
             error_msg = f"⏰ Timeout error (exit {e.exit_code}): {out}"
         else:
             error_msg = f"❌ Claude process failed (exit {e.exit_code}): {out}"
-            
+
         raise RuntimeError(error_msg) from e
     except CLIJSONDecodeError as e:
         # SDK couldn't parse stream-json; surface the raw context
@@ -143,26 +152,26 @@ async def _run_claude_code(params: ClaudeCodeParams) -> str:
         raise RuntimeError(error_msg) from e
     except Exception as e:
         # Catch-all for unexpected errors
-        error_msg = f"💥 Unexpected error during Claude execution: {type(e).__name__}: {str(e)}"
+        error_msg = (
+            f"💥 Unexpected error during Claude execution: {type(e).__name__}: {str(e)}"
+        )
         raise RuntimeError(error_msg) from e
 
     result = "".join(chunks).strip()
-    
+
     if not result:
         return "⚠️ Claude responded but produced no text output. This might indicate:\n• The request was processed but resulted in no response\n• All responses were non-text (tool calls, etc.)\n• Check the prompt and parameters"
-    
+
     return result
 
 
 async def _check_claude_cli_availability() -> None:
     """Check if Claude CLI is available and accessible"""
     import subprocess
+
     try:
         result = subprocess.run(
-            ["which", "claude"],
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["which", "claude"], capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:
             raise RuntimeError("Claude CLI not found in PATH")
@@ -178,6 +187,7 @@ async def _check_authentication_status() -> None:
     if not config_file.exists():
         raise RuntimeError("No authentication config found at ~/.claude/config.json")
 
+
 @claude_mcp.tool()
 async def claude_code(
     prompt: str,
@@ -189,13 +199,13 @@ async def claude_code(
 ) -> str:
     """
     Execute Claude Code CLI to generate, modify, or analyze code.
-    
+
     This tool provides access to Claude's coding capabilities through the official CLI.
     Prerequisites:
     • Claude CLI must be installed (@anthropic-ai/claude-code)
     • Authentication required (use claude_auth_login tool first)
     • Credentials persist in ~/.claude directory
-    
+
     Args:
         prompt: The task or question for Claude to work on
         system_prompt: Optional system prompt to guide Claude's behavior
@@ -203,7 +213,7 @@ async def claude_code(
         allowed_tools: List of tools Claude can use (e.g., ['Read', 'Write', 'Bash'])
         permission_mode: 'plan', 'acceptEdits', or 'bypassPermissions'
         max_turns: Maximum number of conversation turns (1-20)
-    
+
     Returns:
         Claude's response as text, including any analysis or explanations
     """
@@ -217,26 +227,31 @@ async def claude_code(
     )
     return await _run_claude_code(params)
 
+
 # Optional: lightweight readiness probe as an MCP tool
 @claude_mcp.tool()
 async def claude_health() -> str:
     """
     Test Claude Code CLI installation and authentication status.
-    
+
     This performs a minimal test to verify:
     • Claude CLI is installed and accessible
     • Authentication is configured properly
     • Basic functionality is working
-    
+
     Returns:
         'ok' if everything is working, error details otherwise
     """
     _ = await _run_claude_code(
-        ClaudeCodeParams(prompt="ping", max_turns=1, allowed_tools=[], permission_mode="plan")
+        ClaudeCodeParams(
+            prompt="ping", max_turns=1, allowed_tools=[], permission_mode="plan"
+        )
     )
     return "ok"
+
 
 if __name__ == "__main__":
     # fastmcp will typically exec this module; keep a simple entrypoint.
     import anyio
+
     anyio.run(claude_mcp.run)

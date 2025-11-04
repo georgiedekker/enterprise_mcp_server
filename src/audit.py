@@ -11,21 +11,24 @@ logger = logging.getLogger(__name__)
 
 # Default retention period (90 days) can be overridden via environment variable
 DEFAULT_AUDIT_RETENTION_DAYS = 90
-AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", DEFAULT_AUDIT_RETENTION_DAYS))
+AUDIT_RETENTION_DAYS = int(
+    os.getenv("AUDIT_RETENTION_DAYS", DEFAULT_AUDIT_RETENTION_DAYS)
+)
 # Default cleanup interval (once a day)
 AUDIT_CLEANUP_INTERVAL_HOURS = int(os.getenv("AUDIT_CLEANUP_INTERVAL_HOURS", 24))
+
 
 class AuditLogService:
     """
     Service for recording audit events, with configurable retention periods.
-    
+
     Audit log entries are automatically pruned after the configured retention period.
     """
-    
+
     def __init__(self, db_instance: MCPPostgresDB):
         """
         Initialize with database instance.
-        
+
         Args:
             db_instance: MCPPostgresDB instance for database access
         """
@@ -33,40 +36,48 @@ class AuditLogService:
         self.cleanup_task = None
         self.retention_days = AUDIT_RETENTION_DAYS
         self.cleanup_interval = AUDIT_CLEANUP_INTERVAL_HOURS
-        
+
         # Start the cleanup background task
         if self.retention_days > 0:
             self.start_cleanup_task()
-            logger.info(f"Audit log retention set to {self.retention_days} days, cleanup interval {self.cleanup_interval} hours")
+            logger.info(
+                f"Audit log retention set to {self.retention_days} days, cleanup interval {self.cleanup_interval} hours"
+            )
         else:
             logger.info("Audit log retention disabled (retention days <= 0)")
-    
+
     def start_cleanup_task(self):
         """Start the background task for cleaning up old audit logs."""
         if self.cleanup_task is None or self.cleanup_task.done():
             self.cleanup_task = asyncio.create_task(self._cleanup_old_logs_task())
             logger.info("Started audit log cleanup background task")
-    
+
     def stop_cleanup_task(self):
         """Stop the background cleanup task if it's running."""
         if self.cleanup_task and not self.cleanup_task.done():
             self.cleanup_task.cancel()
             logger.info("Canceled audit log cleanup background task")
-    
+
     async def _cleanup_old_logs_task(self):
         """Background task that periodically cleans up old audit logs."""
         try:
             while True:
                 try:
                     # Sleep first to avoid immediate cleanup on startup
-                    await asyncio.sleep(self.cleanup_interval * 3600)  # Convert hours to seconds
-                    
+                    await asyncio.sleep(
+                        self.cleanup_interval * 3600
+                    )  # Convert hours to seconds
+
                     # Perform cleanup
-                    cutoff_date = datetime.utcnow() - timedelta(days=self.retention_days)
+                    cutoff_date = datetime.utcnow() - timedelta(
+                        days=self.retention_days
+                    )
                     deleted_count = await self.delete_logs_before(cutoff_date)
-                    
+
                     if deleted_count > 0:
-                        logger.info(f"Audit log cleanup: Deleted {deleted_count} logs older than {cutoff_date.isoformat()}")
+                        logger.info(
+                            f"Audit log cleanup: Deleted {deleted_count} logs older than {cutoff_date.isoformat()}"
+                        )
                 except asyncio.CancelledError:
                     logger.info("Audit log cleanup task cancelled")
                     raise
@@ -76,26 +87,25 @@ class AuditLogService:
                     await asyncio.sleep(900)  # 15 minutes
         except asyncio.CancelledError:
             logger.info("Audit log cleanup background task terminated")
-    
+
     async def delete_logs_before(self, cutoff_date: datetime) -> int:
         """
         Delete audit logs older than the specified cutoff date.
-        
+
         Args:
             cutoff_date: Datetime before which logs will be deleted
-            
+
         Returns:
             Number of log entries deleted
         """
         try:
             async with self.db.pool.acquire() as conn:
                 result = await conn.execute(
-                    "DELETE FROM audit_logs WHERE timestamp < $1", 
-                    cutoff_date
+                    "DELETE FROM audit_logs WHERE timestamp < $1", cutoff_date
                 )
                 # Parse the DELETE n result to get the count
                 deleted_count = 0
-                if hasattr(result, 'split'):
+                if hasattr(result, "split"):
                     # Format is typically "DELETE n"
                     parts = result.split()
                     if len(parts) > 1 and parts[0] == "DELETE":
@@ -105,17 +115,23 @@ class AuditLogService:
                             deleted_count = 0
                 return deleted_count
         except Exception as e:
-            logger.error(f"Error deleting audit logs before {cutoff_date}: {e}", exc_info=True)
+            logger.error(
+                f"Error deleting audit logs before {cutoff_date}: {e}", exc_info=True
+            )
             return 0
-    
+
     @classmethod
     def __get_pydantic_json_schema__(cls, _core_schema, handler):
         """
         Custom JSON schema generator to prevent schema generation errors.
         This provides a simple schema for the AuditLogService type when used in FastAPI endpoints.
         """
-        return {"type": "object", "title": "AuditLogService", "description": "Audit logging service instance"}
-    
+        return {
+            "type": "object",
+            "title": "AuditLogService",
+            "description": "Audit logging service instance",
+        }
+
     async def log_event(
         self,
         actor_id: Optional[int],
@@ -125,11 +141,11 @@ class AuditLogService:
         resource_id: Optional[str],
         status: str,
         details: Optional[Dict[str, Any]] = None,
-        request: Optional[Request] = None
+        request: Optional[Request] = None,
     ) -> int:
         """
         Log an audit event.
-        
+
         Args:
             actor_id: ID of the actor performing the action (user/agent ID)
             actor_type: Type of actor ('human', 'ai_agent', 'system')
@@ -139,18 +155,18 @@ class AuditLogService:
             status: Status of the action ('success', 'failure')
             details: Additional details about the action
             request: FastAPI request object for extracting client info (optional)
-            
+
         Returns:
             ID of the created audit log entry
         """
         # Generate a unique request ID if not already present
         request_id = getattr(request, "id", str(uuid7())) if request else str(uuid7())
-        
+
         # Extract client IP if request is provided
         ip_address = None
         if request:
             ip_address = request.client.host if request.client else None
-        
+
         # Log the event to the database
         log_id = await self.db.log_audit_event(
             actor_id=actor_id,
@@ -161,16 +177,16 @@ class AuditLogService:
             status=status,
             details=details,
             request_id=request_id,
-            ip_address=ip_address
+            ip_address=ip_address,
         )
-        
+
         logger.info(
             f"Audit log: {action_type} {resource_type} "
             f"by {actor_type} {actor_id} - {status}"
         )
-        
+
         return log_id
-    
+
     async def get_logs(
         self,
         start_time: Optional[datetime] = None,
@@ -182,11 +198,11 @@ class AuditLogService:
         resource_id: Optional[str] = None,
         status: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """
         Get audit logs with optional filtering.
-        
+
         Args:
             start_time: Filter logs after this time
             end_time: Filter logs before this time
@@ -198,7 +214,7 @@ class AuditLogService:
             status: Filter logs by status
             limit: Maximum number of logs to return
             offset: Offset for pagination
-            
+
         Returns:
             List of audit log entries
         """
@@ -212,5 +228,5 @@ class AuditLogService:
             resource_id=resource_id,
             status=status,
             limit=limit,
-            offset=offset
-        ) 
+            offset=offset,
+        )

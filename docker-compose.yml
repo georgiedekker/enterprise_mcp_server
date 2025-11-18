@@ -54,7 +54,7 @@ services:
     - LOG_LEVEL=INFO
     - CORS_ALLOWED_ORIGINS=https://app.cursor.sh,https://cursor.sh,http://localhost:*,http://127.0.0.1:*
     - PYTHONUNBUFFERED=1
-    - POSTGRES_HOST=192.168.0.245
+    - POSTGRES_HOST=postgres.internal
     - POSTGRES_PORT=6432
     - POSTGRES_DB=enterprise_mcp_server
     - POSTGRES_USER=enterprise_mcp_server
